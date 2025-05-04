@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KavachAI - Crowd Heatmap</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/heatmap.js/2.0.2/heatmap.min.js"></script>
+    <style>
+        
+        #heatmapContainer {
+            width: 100%;
+            
+            
+            
+            
+            padding-top: 56.25%; 
+            position: relative; 
+            background-color: #e5e7eb; 
+            border: 1px solid #d1d5db; 
+            overflow: hidden; 
+        }
+        #heatmapCanvas { 
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+         
+        
+
+        
+        #heatmapStatus {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9em;
+            z-index: 10; 
+        }
+    </style>
+</head>
+<body class="bg-slate-100">
+    <nav class="bg-slate-800 text-white shadow-md">
+        <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center">
+                <i class="fas fa-shield-alt text-3xl mr-3 text-blue-400"></i>
+                <h1 class="text-2xl font-bold tracking-tight">KavachAI</h1>
+            </div>
+            <div class="space-x-5">
+                <a href="/" class="text-slate-300 hover:text-white">Dashboard</a>
+                <a href="/map_view" class="text-slate-300 hover:text-white ">Map View</a>
+                <a href="/heatmap" class="text-slate-300 hover:text-white font-semibold border-b-2 border-blue-500 pb-1" target="_blank">Heatmap</a>
+                <a href="/analytics" class="text-slate-300 hover:text-white" target="_blank">Analytics</a>
+                <a href="/settings" class="text-slate-300 hover:text-white" target="_blank">Settings</a>
+            </div>
+        </div>
+    </nav>
+
+    
+    <div class="container mx-auto p-4">
+        <h2 class="text-2xl font-semibold mb-4 text-center">Crowd Density Heatmap</h2>
+
+        <div class="bg-white rounded-lg shadow-lg p-4">
+            <div id="heatmapContainer" class="rounded-lg relative">
+                
+                
+                <div id="heatmapStatus">Waiting for data...</div>
+            </div>
+             <p class="text-xs text-gray-500 mt-2 text-center">
+                Heatmap visualizes detected person locations. Colors range from blue (low density) to red (high density).
+            </p>
+        </div>
+
+         
+        <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+             <div class="bg-blue-50 p-4 rounded-lg text-center">
+                 <p class="text-sm text-gray-600">Last Update</p>
+                 <p id="lastUpdateTime" class="text-xl font-bold text-blue-600">-</p>
+             </div>
+            <div class="bg-green-50 p-4 rounded-lg text-center">
+                 <p class="text-sm text-gray-600">Current Count</p>
+                 <p id="currentCount" class="text-xl font-bold text-green-600">0</p>
+             </div>
+             <div class="bg-red-50 p-4 rounded-lg text-center">
+                 <p class="text-sm text-gray-600">Frame Dimensions</p>
+                 <p id="frameDimensions" class="text-xl font-bold text-red-600">N/A</p>
+             </div>
+        </div>
+
+    </div>
+
+    <script>
+        const heatmapContainer = document.getElementById('heatmapContainer');
+        const heatmapStatus = document.getElementById('heatmapStatus');
+        const lastUpdateTimeElement = document.getElementById('lastUpdateTime');
+        const currentCountElement = document.getElementById('currentCount');
+        const frameDimensionsElement = document.getElementById('frameDimensions');
+
+        let heatmapInstance = null;
+        let lastKnownFrameWidth = 0;
+        let lastKnownFrameHeight = 0;
+        let intervalId = null;
+        const fetchInterval = 1000; 
+
+        
+        function initializeHeatmap() {
+            if (!heatmapInstance) {
+                try {
+                    heatmapInstance = h337.create({
+                        container: heatmapContainer, 
+                        radius: 20, 
+                        maxOpacity: 0.6, 
+                        minOpacity: 0.1, 
+                        blur: 0.85, 
+                        
+                        gradient: {
+                          '.1': 'blue',
+                          '.3': 'cyan',
+                          '.5': 'lime',
+                          '.7': 'yellow',
+                          '.95': 'red'
+                        }
+                    });
+                    console.log("Heatmap instance created.");
+                    heatmapStatus.textContent = 'Initialized. Waiting for data...';
+                } catch (error) {
+                     console.error("Error initializing heatmap:", error);
+                     heatmapStatus.textContent = 'Error initializing heatmap!';
+                     heatmapStatus.style.backgroundColor = 'red';
+                }
+            }
+        }
+
+        
+        async function fetchAndUpdateHeatmap() {
+            if (!heatmapInstance) {
+                console.warn("Heatmap not initialized yet.");
+                return;
+            }
+
+            try {
+                const response = await fetch('/get_heatmap_data');
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+                const data = await response.json();
+
+                if (data.status === 'success' && data.frame_width > 0 && data.frame_height > 0) {
+                    lastKnownFrameWidth = data.frame_width;
+                    lastKnownFrameHeight = data.frame_height;
+
+                    
+                    const containerWidth = heatmapContainer.clientWidth;
+                    const containerHeight = heatmapContainer.clientHeight;
+
+                    if (containerWidth <= 0 || containerHeight <= 0) {
+                        console.warn("Container dimensions are zero, skipping update.");
+                         heatmapStatus.textContent = 'Container size error.';
+                        return; 
+                    }
+
+                    
+                    const scaleX = containerWidth / lastKnownFrameWidth;
+                    const scaleY = containerHeight / lastKnownFrameHeight;
+
+                    
+                    const heatmapData = {
+                        max: 5, 
+                        data: data.points.map(point => ({
+                            x: Math.round(point.x * scaleX), 
+                            y: Math.round(point.y * scaleY), 
+                            value: point.value || 1 
+                        }))
+                    };
+
+                    
+                    heatmapInstance.setData(heatmapData);
+
+                    
+                    heatmapStatus.textContent = `Processing ${data.points.length} points`;
+                    heatmapStatus.style.backgroundColor = 'rgba(0, 0, 0, 0.6)'; 
+                    lastUpdateTimeElement.textContent = new Date().toLocaleTimeString();
+                    currentCountElement.textContent = data.points.length; 
+                    frameDimensionsElement.textContent = `${data.frame_width}x${data.frame_height}`;
+
+
+                } else if (data.status === 'waiting') {
+                     heatmapStatus.textContent = 'Waiting for first frame...';
+                     
+                     heatmapInstance.setData({ max: 1, data: [] });
+                     currentCountElement.textContent = 0;
+                     frameDimensionsElement.textContent = 'N/A';
+                } else {
+                    
+                    console.warn("Received data but frame dimensions are invalid or status not success/waiting:", data);
+                    heatmapStatus.textContent = 'Invalid data received.';
+                    
+                    
+                }
+
+            } catch (error) {
+                console.error("Error fetching or processing heatmap data:", error);
+                heatmapStatus.textContent = 'Error fetching data!';
+                heatmapStatus.style.backgroundColor = 'red';
+                
+                
+            }
+        }
+
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeHeatmap(); 
+
+            
+            if (intervalId) clearInterval(intervalId); 
+            intervalId = setInterval(fetchAndUpdateHeatmap, fetchInterval);
+
+            
+            fetchAndUpdateHeatmap();
+
+            
+             let resizeTimeout;
+             window.addEventListener('resize', () => {
+                 clearTimeout(resizeTimeout);
+                 resizeTimeout = setTimeout(() => {
+                     if (heatmapInstance && lastKnownFrameWidth > 0) {
+                         console.log("Window resized, re-rendering heatmap.");
+                         
+                         
+                          fetchAndUpdateHeatmap();
+                     }
+                 }, 250); 
+             });
+        });
+
+    </script>
+</body>
+</html>

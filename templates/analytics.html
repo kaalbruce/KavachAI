@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>KavachAI - Graphical View</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+</head>
+<body class="bg-slate-100">
+  <nav class="bg-slate-800 text-white shadow-md">
+      <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+          <div class="flex items-center">
+              <i class="fas fa-shield-alt text-3xl mr-3 text-blue-400"></i>
+              <h1 class="text-2xl font-bold tracking-tight">KavachAI</h1>
+          </div>
+          <div class="space-x-5">
+              <a href="/" class="text-slate-300 hover:text-white">Dashboard</a>
+              <a href="/map_view" class="text-slate-300 hover:text-white ">Map View</a>
+              <a href="/heatmap" class="text-slate-300 hover:text-white" target="_blank">Heatmap</a>
+              <a href="/analytics" class="text-slate-300 hover:text-white font-semibold border-b-2 border-blue-500 pb-1" target="_blank">Analytics</a>
+              <a href="/settings" class="text-slate-300 hover:text-white" target="_blank">Settings</a>
+          </div>
+      </div>
+  </nav>
+
+
+<div class="container mx-auto p-4 flex-1">
+  <div class="flex flex-col lg:flex-row gap-6">
+
+
+    <div class="bg-white rounded-lg shadow-lg p-4 flex-1">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
+        <h2 class="text-lg sm:text-xl font-semibold">Real-Time People Count</h2>
+        <select id="timeRange" class="border border-gray-300 rounded px-3 py-1 text-sm">
+          <option value="seconds">Seconds</option>
+          <option value="minutes">Minutes</option>
+          <option value="hours">Hours</option>
+          <option value="days">Days</option>
+        </select>
+      </div>
+      <div class="overflow-x-auto">
+        <canvas id="peopleCountChart" height="200" class="min-w-[300px]"></canvas>
+      </div>
+    </div>
+
+
+<div class="bg-white rounded-lg shadow-lg p-4 mt-6">
+    <h2 class="text-lg sm:text-xl font-semibold text-center mb-4">Crowd Density</h2>
+    <div class="w-full max-w-xs mx-auto">
+      <canvas id="densityPieChart"></canvas>
+    </div>
+  </div>
+
+
+    <div class="bg-white rounded-lg shadow-lg p-4 w-full lg:w-1/3">
+      <h2 class="text-lg sm:text-xl font-semibold mb-4 text-center">Status Overview</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="p-4 bg-green-100 rounded-lg text-center">
+          <p class="text-sm text-gray-600">Current Count</p>
+          <p id="graphPeopleCount" class="text-2xl sm:text-3xl font-bold text-green-600">0</p>
+        </div>
+        <div class="p-4 bg-blue-100 rounded-lg text-center">
+          <p class="text-sm text-gray-600">Capacity Limit</p>
+          <p id="graphCapacityLimit" class="text-2xl sm:text-3xl font-bold text-blue-600">0</p>
+        </div>
+        <div class="p-4 bg-gray-100 rounded-lg text-center">
+          <p class="text-sm text-gray-600">Density Level</p>
+          <p id="graphDensityLevel" class="text-xl sm:text-2xl font-bold text-gray-800">-</p>
+        </div>
+        <div class="p-4 bg-yellow-100 rounded-lg text-center">
+          <p class="text-sm text-gray-600">Last Updated</p>
+          <p id="graphUpdateTime" class="text-base text-gray-800">-</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fixed bottom-0 left-0 w-full bg-white border-t border-gray-300 py-4 shadow-md z-50">
+  <div class="flex justify-center space-x-4">
+    <a href="/download_data" class="bg-blue-600 text-white py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 transition-colors flex items-center">
+      <i class="fas fa-file-excel mr-2"></i>
+      Download as Excel
+    </a>
+    <a href="/download_data_csv" class="bg-green-600 text-white py-3 px-6 rounded-lg shadow-md hover:bg-green-700 transition-colors flex items-center">
+      <i class="fas fa-file-csv mr-2"></i>
+      Download as CSV
+    </a>
+  </div>
+</div>
+
+
+
+<script>
+  const chartCtx = document.getElementById('peopleCountChart').getContext('2d');
+  const timeRangeSelect = document.getElementById("timeRange");
+
+  const peopleData = {
+    labels: [],
+    datasets: [
+      {
+        label: 'Previous Day',
+        data: [],
+        backgroundColor: 'rgba(239, 68, 68, 0.2)',
+        borderColor: '#ef4444',
+        borderDash: [5, 5],
+        fill: false,
+        tension: 0.2
+      },
+      {
+        label: 'People Count',
+        data: [],
+        backgroundColor: '#3b82f6',
+        borderColor: '#1d4ed8',
+        fill: false,
+        tension: 0.2
+      }
+    ]
+  };
+
+  const peopleChart = new Chart(chartCtx, {
+    type: 'line',
+    data: peopleData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { beginAtZero: true }
+      }
+    }
+  });
+
+  const densityCtx = document.getElementById('densityPieChart').getContext('2d');
+
+const densityChart = new Chart(densityCtx, {
+  type: 'doughnut',
+  data: {
+    labels: ['Low', 'Medium', 'High'],
+    datasets: [{
+      data: [0, 0, 0],
+      backgroundColor: ['#86efac', '#facc15', '#f87171'],
+      borderColor: ['#22c55e', '#eab308', '#dc2626'],
+      borderWidth: 1
+    }]
+  },
+  options: {
+    responsive: true,
+    cutout: '70%',
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: {
+          color: '#333',
+          font: {
+            size: 14
+          }
+        }
+      }
+    }
+  }
+});
+
+
+  function formatTimestamp(date, range) {
+    if (range === 'days') return date.toLocaleDateString();
+    if (range === 'hours' || range === 'minutes') return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleTimeString();
+  }
+
+  function groupData(data, range) {
+    const grouped = {};
+    data.forEach(entry => {
+      const date = new Date(entry.timestamp);
+      let key = '';
+      if (range === 'days') {
+        key = date.toISOString().split('T')[0];
+      } else if (range === 'hours') {
+        key = date.toISOString().slice(0, 13);
+      } else if (range === 'minutes') {
+        key = date.toISOString().slice(0, 16);
+      } else {
+        key = date.toLocaleTimeString();
+      }
+
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(entry.current_count || 0);
+    });
+
+    return Object.entries(grouped).map(([key, values]) => ({
+      time: key,
+      count: Math.round(values.reduce((a, b) => a + b, 0) / values.length)
+    }));
+  }
+
+  function generatePreviousDayData(labels) {
+    return labels.map(() => Math.floor(Math.random() * 7) + 2);
+  }
+
+  async function fetchGraphData() {
+    try {
+      const res = await fetch('/get_stats');
+      if (!res.ok) throw new Error('Server error');
+      return await res.json();
+    } catch (err) {
+      console.error("Error fetching:", err);
+      return null;
+    }
+  }
+
+  async function loadHistory() {
+    try {
+      const res = await fetch('/get_history');
+      const data = await res.json();
+      const range = timeRangeSelect.value;
+
+      const grouped = groupData(data.slice(-200), range);
+      const labels = grouped.map(d => d.time);
+      const values = grouped.map(d => d.count);
+
+      peopleChart.data.labels = labels;
+      peopleChart.data.datasets[0].data = generatePreviousDayData(labels); 
+      peopleChart.data.datasets[1].data = values;                         
+      peopleChart.update();
+    } catch (err) {
+      console.error("Error loading history:", err);
+    }
+  }
+
+
+function updateUI(data) {
+  if (!data) return;
+
+  const now = new Date();
+  const range = timeRangeSelect.value;
+  const formattedTime = formatTimestamp(now, range);
+
+  if (range === 'seconds') {
+    if (peopleChart.data.labels.length > 20) {
+      peopleChart.data.labels.shift();
+      peopleChart.data.datasets[0].data.shift();
+      peopleChart.data.datasets[1].data.shift();
+    }
+
+    peopleChart.data.labels.push(formattedTime);
+    peopleChart.data.datasets[0].data.push(Math.floor(Math.random() * 5) + 0);
+    peopleChart.data.datasets[1].data.push(data.current_count || 0);
+    peopleChart.update();
+  }
+
+  document.getElementById('graphPeopleCount').textContent = data.current_count ?? '-';
+  document.getElementById('graphCapacityLimit').textContent = data.max_people ?? '-';
+  document.getElementById('graphDensityLevel').textContent = data.density_level ?? '-';
+  document.getElementById('graphUpdateTime').textContent = formattedTime;
+
+
+  if (data.current_count !== undefined) {
+    const currentCount = data.current_count;
+    const threshold = data.max_people || THRESHOLD || 10;
+
+
+    let low = 0, medium = 0, high = 0;
+
+    if (currentCount <= threshold * 0.3) {
+
+      low = Math.max(1, currentCount);
+      medium = 0;
+      high = 0;
+    } else if (currentCount <= threshold * 0.7) {
+
+      low = Math.floor(threshold * 0.3);
+      medium = Math.max(1, currentCount - low);
+      high = 0;
+    } else {
+
+      low = Math.floor(threshold * 0.3);
+      medium = Math.floor(threshold * 0.4);
+      high = Math.max(1, currentCount - low - medium);
+    }
+
+    densityChart.data.datasets[0].data = [low, medium, high];
+    densityChart.update();
+  }
+
+
+  }
+
+  async function updateDataLoop() {
+    const data = await fetchGraphData();
+    updateUI(data);
+  }
+
+  timeRangeSelect.addEventListener("change", async () => {
+    await loadHistory();
+  });
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    await loadHistory();
+    updateDataLoop();
+    setInterval(updateDataLoop, 2000);
+  });
+
+
+</script>
+</body>
+</html>

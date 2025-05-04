@@ -1,0 +1,10 @@
+Flask>=2.0
+opencv-python-headless
+twilio
+ultralytics
+numpy
+gunicorn
+googlemaps
+pandas>=1.3.0
+openpyxl>=3.0.7
+python-dotenv

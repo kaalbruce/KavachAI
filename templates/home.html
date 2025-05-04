@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KavachAI - Smart Crowd Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        #videoFeed, #fallbackImage {
+             border: 1px solid #e2e8f0;
+             background-color: #f1f5f9;
+             display: block;
+             width: 100%;
+             height: 100%;
+             object-fit: cover;
+        }
+        #fallbackImage {
+            display: none;
+        }
+        #captureCanvas { display: none; }
+
+        .status-ok { color: #16a34a; }
+        .status-warning { color: #f59e0b; }
+        .status-error { color: #dc2626; }
+        .status-inactive { color: #64748b; }
+        .status-processing { color: #2563eb; }
+
+        .processing-indicator {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background-color: rgba(30, 41, 59, 0.7);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            display: none;
+            z-index: 15;
+        }
+        .camera-off-message {
+            position: absolute;
+            inset: 0;
+            background-color: rgba(51, 65, 85, 0.85);
+            color: #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            border-radius: 0.5rem;
+            visibility: visible;
+            opacity: 1;
+            transition: visibility 0s, opacity 0.3s linear;
+            z-index: 10;
+        }
+        .camera-off-message.hidden {
+             visibility: hidden;
+             opacity: 0;
+        }
+        .camera-off-message button {
+            margin-top: 20px;
+            background-color: #3b82f6;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background-color 0.2s ease;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+        }
+         .camera-off-message button:hover {
+             background-color: #2563eb;
+         }
+         .camera-off-message button:disabled {
+             background-color: #94a3b8;
+             cursor: not-allowed;
+         }
+         .camera-off-message i {
+             color: #f1f5f9;
+         }
+
+        #locationContextList li { margin-bottom: 0.35rem; font-size: 0.9rem; color: #475569; }
+        #locationContextList i.fa-fw { margin-right: 0.5rem; color: #64748b; width: 1.2em; text-align: center; }
+        #locationContextList .context-item-value { font-weight: 500; color: #1e293b }
+
+
+        .alert-item { border-left-width: 4px; padding: 0.75rem; margin-bottom: 0.5rem; border-radius: 0.375rem; font-size: 0.875rem; }
+        .alert-critical { border-color: #ef4444; background-color: #fee2e2; color: #b91c1c; }
+        .alert-warning { border-color: #f59e0b; background-color: #fffbeb; color: #b45309; }
+        .alert-info { border-color: #3b82f6; background-color: #dbeafe; color: #1d4ed8; }
+        .alert-item i { margin-right: 0.5rem; }
+        .alert-item .timestamp { font-size: 0.75rem; color: #475569; }
+
+
+        @keyframes pulse-status {
+          0%, 100% { opacity: 1; }
+          50% { opacity: .5; }
+        }
+        .animate-pulse-status { animation: pulse-status 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+    </style>
+</head>
+<body class="bg-slate-100">
+    <nav class="bg-slate-800 text-white shadow-md">
+        <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center">
+                <i class="fas fa-shield-alt text-3xl mr-3 text-blue-400"></i>
+                <h1 class="text-2xl font-bold tracking-tight">KavachAI</h1>
+            </div>
+            <div class="space-x-5">
+                <a href="/" class="text-slate-300 hover:text-white font-semibold border-b-2 border-blue-500 pb-1">Dashboard</a>
+                <a href="/map_view" class="text-slate-300 hover:text-white" target="_blank">Map View</a>
+                <a href="/heatmap" class="text-slate-300 hover:text-white" target="_blank">Heatmap</a>
+                <a href="/analytics" class="text-slate-300 hover:text-white" target="_blank">Analytics</a>
+                <a href="/settings" class="text-slate-300 hover:text-white" target="_blank">Settings</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto p-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-2 space-y-6">
+
+                <div class="bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden">
+                    <div class="p-4 border-b border-slate-200">
+                       <h2 class="text-xl font-semibold text-slate-700">Live Camera Feed (<span id="activeSourceInfo" class="font-normal text-sm text-slate-500">Source: Off</span>)</h2>
+                    </div>
+                    <div class="p-4">
+                        <div class="aspect-video bg-slate-200 rounded-md relative border-2 border-slate-300">
+                            <video id="videoFeed" autoplay muted playsinline class="w-full h-full rounded-md" crossorigin="anonymous"></video>
+                            <img id="fallbackImage" class="w-full h-full rounded-md" crossorigin="anonymous" style="display: none;">
+                            <canvas id="captureCanvas"></canvas>
+                             <div id="cameraOffMessage" class="camera-off-message rounded-md">
+                                <i class="fas fa-video-slash text-5xl mb-4"></i>
+                                <p id="cameraMessageText" class="text-lg font-medium">Video source is off.</p>
+                                <button id="startCameraButton">
+                                    <i class="fas fa-play mr-2"></i>Start Video
+                                </button>
+                            </div>
+                            <div id="overlayWarning" class="hidden absolute inset-0 bg-red-600 bg-opacity-60 flex items-center justify-center rounded-md">
+                                <div class="text-white text-center">
+                                    <div class="text-6xl mb-2 animate-pulse"><i class="fas fa-exclamation-triangle"></i></div>
+                                    <div class="text-3xl font-bold uppercase tracking-wider">Warning</div>
+                                    <div class="text-lg">Critical Density Reached</div>
+                                </div>
+                            </div>
+                             <div id="processingIndicator" class="processing-indicator">
+                                 <i class="fas fa-spinner fa-spin mr-1"></i> Processing...
+                             </div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-4 p-4 border-t border-slate-200 bg-slate-50">
+                        <div class="bg-green-50 border border-green-200 p-4 rounded-lg text-center">
+                            <p class="text-sm font-medium text-slate-500 mb-1">Current Count</p>
+                             <div class="flex items-center justify-center space-x-2">
+                                <i class="fas fa-users text-xl text-green-600"></i>
+                                <p id="peopleCount" class="text-3xl font-bold text-green-600">0</p>
+                             </div>
+                        </div>
+                         <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg text-center">
+                            <p class="text-sm font-medium text-slate-500 mb-1">Capacity Limit</p>
+                             <div class="flex items-center justify-center space-x-2">
+                                <i class="fas fa-chart-pie text-xl text-blue-600"></i>
+                                <p id="capacityLimit" class="text-3xl font-bold text-blue-600">?</p>
+                             </div>
+                        </div>
+                         <div class="bg-purple-50 border border-purple-200 p-4 rounded-lg text-center">
+                            <p class="text-sm font-medium text-slate-500 mb-1">Density Level</p>
+                             <div class="flex items-center justify-center space-x-2">
+                                <i id="densityIcon" class="fas fa-circle-nodes text-xl text-slate-500"></i>
+                                <p id="densityLevel" class="text-3xl font-bold text-slate-500">Off</p>
+                             </div>
+                        </div>
+                    </div>
+                </div>
+
+
+                <div class="bg-white rounded-lg shadow-md border border-slate-200">
+                     <div class="p-4 border-b border-slate-200">
+                         <h2 class="text-xl font-semibold text-slate-700">Recent Alerts</h2>
+                     </div>
+                     <div id="alertContainer" class="p-4 space-y-3 max-h-60 overflow-y-auto">
+                         <p class="text-sm text-slate-400 text-center italic">No alerts yet.</p>
+
+                     </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-1 space-y-6">
+
+                <div class="bg-white rounded-lg shadow-md border border-slate-200 p-4">
+                     <h2 class="text-xl font-semibold text-slate-700 mb-4">System Status</h2>
+                     <div class="flex items-center mb-4 pb-4 border-b border-slate-200">
+                         <div id="statusIndicator" class="w-4 h-4 rounded-full bg-slate-400 mr-3 flex-shrink-0"></div>
+                         <span id="statusText" class="font-semibold text-slate-500">Video Off</span>
+                     </div>
+                     <div class="space-y-2 text-sm">
+                        <div class="flex justify-between"><span class="text-slate-600">Video Source:</span><span id="cameraStatus" class="font-medium text-slate-800">Off</span></div>
+                        <div class="flex justify-between"><span class="text-slate-600">Configured:</span><span id="configuredSource" class="font-medium text-slate-800">Loading...</span></div>
+                        <div class="flex justify-between"><span class="text-slate-600">Last Alert:</span><span id="lastAlertTime" class="font-medium text-slate-800">-</span></div>
+                        <div class="flex justify-between"><span class="text-slate-600">Server:</span><span id="serverStatus" class="font-medium status-inactive">Waiting...</span></div>
+                        <div class="flex justify-between"><span class="text-slate-600">Notifications:</span><span id="smsStatus" class="font-medium status-inactive">Inactive</span></div>
+                     </div>
+                </div>
+
+
+                <div id="locationContextSection" class="bg-white rounded-lg shadow-md border border-slate-200 p-4 hidden">
+                    <h2 class="text-xl font-semibold text-slate-700 mb-3">Location Context</h2>
+                    <div id="locationContextStatus" class="text-xs text-slate-400 italic mb-3">Loading context...</div>
+                    <ul id="locationContextList" class="list-none space-y-1">
+
+                    </ul>
+                </div>
+
+
+                 <div class="bg-white rounded-lg shadow-md border border-slate-200 p-4">
+                     <h2 class="text-xl font-semibold text-slate-700 mb-4">Density Views</h2>
+                     <div class="space-y-3">
+                         <a href="/heatmap" target="_blank" class="flex items-center justify-center py-2 px-4 bg-gradient-to-r from-orange-500 to-red-600 text-white rounded-md hover:from-orange-600 hover:to-red-700 transition duration-150 font-semibold shadow">
+                             <i class="fas fa-fire mr-2"></i> View Heatmap
+                         </a>
+                         <a href="/map_view" target="_blank" class="flex items-center justify-center py-2 px-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-md hover:from-blue-600 hover:to-indigo-700 transition duration-150 font-semibold shadow">
+                             <i class="fas fa-map-marker-alt mr-2"></i> View Bubble Map
+                         </a>
+                     </div>
+                     <p class="text-xs text-slate-500 mt-3 text-center">Open density visualizations in a new tab.</p>
+                 </div>
+
+
+                 <div class="border-l-4 border-red-500 bg-red-50 p-4 rounded-r-lg shadow-sm">
+                     <h2 class="text-lg font-semibold mb-2 text-red-700 flex items-center"><i class="fas fa-exclamation-triangle mr-2"></i>Emergency Protocol</h2>
+                     <ul class="list-disc list-inside space-y-1 text-sm text-red-600">
+                        <li>Activate designated exit pathways</li>
+                        <li>Trigger emergency alert systems & lighting</li>
+                        <li>Notify security personnel immediately</li>
+                        <li>Initiate pre-defined crowd control measures</li>
+                        <li>Monitor situation via alternate feeds if available</li>
+                     </ul>
+                 </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+
+        const videoElement = document.getElementById('videoFeed');
+        const fallbackImageElement = document.getElementById('fallbackImage');
+        const canvasElement = document.getElementById('captureCanvas');
+        const context = canvasElement.getContext('2d', { willReadFrequently: true });
+        const startCameraButton = document.getElementById('startCameraButton');
+        const cameraOffMessage = document.getElementById('cameraOffMessage');
+        const cameraMessageText = document.getElementById('cameraMessageText');
+        const processingIndicator = document.getElementById('processingIndicator');
+        const serverStatusElement = document.getElementById('serverStatus');
+        const cameraStatusElement = document.getElementById('cameraStatus');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusTextElement = document.getElementById('statusText');
+        const configuredSourceElement = document.getElementById('configuredSource');
+        const activeSourceInfoElement = document.getElementById('activeSourceInfo');
+        const locationContextSection = document.getElementById('locationContextSection');
+        const locationContextStatus = document.getElementById('locationContextStatus');
+        const locationContextList = document.getElementById('locationContextList');
+        const alertContainer = document.getElementById('alertContainer');
+        const densityIcon = document.getElementById('densityIcon');
+
+        let stream = null;
+        let intervalId = null;
+        let imageRefreshIntervalId = null;
+        let locationContextIntervalId = null;
+        const processInterval = 1000;
+        const contextRefreshInterval = 300000;
+        let isProcessing = false;
+        let currentVideoSourceType = 'local';
+        let currentIpCameraUrl = '';
+        let currentLat = null;
+        let currentLon = null;
+        let videoErrorTimeout = null;
+        let activeDisplayElement = null;
+        let initialAlertMessageCleared = false;
+
+        async function loadInitialSettings() {
+             console.log("Fetching initial stats and settings...");
+             configuredSourceElement.textContent = 'Loading...';
+             startCameraButton.disabled = true;
+             cameraMessageText.textContent = "Loading settings...";
+             cameraOffMessage.classList.remove('hidden');
+             locationContextSection.classList.add('hidden');
+
+             try {
+                 const response = await fetch('/get_stats');
+                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                 const data = await response.json();
+
+                 currentVideoSourceType = data.video_source_type || 'local';
+                 currentIpCameraUrl = data.ip_camera_url || '';
+                 currentLat = data.monitored_lat;
+                 currentLon = data.monitored_lon;
+
+                 document.getElementById('capacityLimit').textContent = data.max_people ?? '?';
+                 if (data.last_alert) document.getElementById('lastAlertTime').textContent = new Date(data.last_alert * 1000).toLocaleTimeString();
+                 else document.getElementById('lastAlertTime').textContent = '-';
+
+                 updateSmsStatus(data.alert_active, data.alert_triggered);
+
+                 updateConfiguredSourceDisplay();
+                 console.log("Initial settings loaded:", data);
+                 cameraMessageText.textContent = "Video source is off.";
+                 startCameraButton.disabled = false;
+
+                 updateLocationContextUI();
+                 setupLocationContextRefresh();
+
+             } catch (err) {
+                 console.error("Error fetching initial stats/settings:", err);
+                 configuredSourceElement.textContent = 'Error Loading';
+                 configuredSourceElement.className = 'font-medium status-error';
+                 document.getElementById('capacityLimit').textContent = '?';
+                 cameraMessageText.textContent = `Error fetching settings: ${err.message}.`;
+                 startCameraButton.disabled = true;
+                 updateLocationContextUI();
+                 locationContextStatus.textContent = 'Could not load location settings.';
+                 locationContextStatus.className = 'text-xs status-error italic mb-3';
+             }
+        }
+
+        function updateConfiguredSourceDisplay() {
+            let displayText = 'Local Webcam';
+            let displayTitle = 'Local Webcam';
+            if (currentVideoSourceType === 'ip' && currentIpCameraUrl) {
+                let shortUrl = currentIpCameraUrl;
+                if (shortUrl.length > 25) { shortUrl = shortUrl.substring(0, 12) + '...' + shortUrl.substring(shortUrl.length - 10); }
+                displayText = `IP Cam (${shortUrl})`;
+                displayTitle = `IP Camera: ${currentIpCameraUrl}`;
+            }
+            configuredSourceElement.textContent = displayText;
+            configuredSourceElement.title = displayTitle;
+            configuredSourceElement.className = 'font-medium text-slate-800 truncate';
+        }
+
+        function setupLocationContextRefresh() {
+            if (locationContextIntervalId) {
+                 clearInterval(locationContextIntervalId);
+                 locationContextIntervalId = null;
+                 console.log("Cleared previous location context interval.");
+            }
+             if (currentLat !== null && currentLon !== null) {
+                 fetchLocationContext();
+                 locationContextIntervalId = setInterval(fetchLocationContext, contextRefreshInterval);
+                 console.log(`Started location context refresh interval (ID: ${locationContextIntervalId}, ${contextRefreshInterval}ms).`);
+             } else {
+                  console.log("Location not set, context refresh interval not started.");
+                  updateLocationContextUI();
+             }
+        }
+
+        async function startCamera() {
+            console.log(`Attempting to start video source: ${currentVideoSourceType}`);
+            stopCamera();
+
+            activeSourceInfoElement.textContent = `Connecting...`;
+            cameraMessageText.textContent = `Attempting to start ${currentVideoSourceType === 'ip' ? 'IP Camera' : 'Local Webcam'}...`;
+            cameraOffMessage.classList.remove('hidden');
+            startCameraButton.disabled = true;
+            startCameraButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Starting...';
+            updateStatusDisplay('Connecting', 'processing', 'Connecting...');
+            cameraStatusElement.textContent = 'Connecting...';
+            cameraStatusElement.className = 'font-medium status-processing';
+
+            if (currentVideoSourceType === 'local') {
+                await startLocalWebcam();
+            } else if (currentVideoSourceType === 'ip') {
+                attemptIpVideoStream();
+            } else {
+                 console.error("Invalid video_source_type:", currentVideoSourceType);
+                 handleStartError("Invalid video source configured.");
+
+                 startCameraButton.disabled = false;
+                 startCameraButton.innerHTML = '<i class="fas fa-play mr-2"></i>Start Video';
+            }
+        }
+
+        async function startLocalWebcam() {
+             activeSourceInfoElement.textContent = "Source: Local Webcam";
+             videoElement.style.display = 'block';
+             fallbackImageElement.style.display = 'none';
+             try {
+                console.log("Requesting local webcam access...");
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                console.log("Local webcam access granted.");
+                videoElement.srcObject = stream;
+                videoElement.removeAttribute('src');
+
+                await new Promise((resolve, reject) => {
+                    videoElement.onloadedmetadata = null; videoElement.onerror = null; videoElement.onplaying = null;
+                    videoElement.onplaying = () => {
+                         console.log("Local video is playing.");
+                         if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+                             activeDisplayElement = videoElement;
+                             setupCanvasAndStartProcessing("Local Webcam");
+                             resolve();
+                         } else {
+                             console.error("Local video playing but dimensions invalid.");
+                             reject(new Error("Video dimensions are invalid."));
+                         }
+                    };
+                    videoElement.onerror = (e) => {
+                        console.error("Video Element Error (Local):", e);
+                        reject(new Error("Failed to load video stream."));
+                    };
+
+                    setTimeout(() => reject(new Error("Timeout waiting for video to play.")), 5000);
+                });
+            } catch (error) {
+                console.error('Error accessing/starting local webcam:', error);
+                handleStartError(`Webcam Error: ${error.message}.`);
+            }
+        }
+
+        function attemptIpVideoStream() {
+             const shortUrl = currentIpCameraUrl.length > 20 ? currentIpCameraUrl.substring(0, 20) + '...' : currentIpCameraUrl;
+            activeSourceInfoElement.textContent = `Source: IP Cam (${shortUrl}) - Video Mode`;
+            if (!currentIpCameraUrl) { handleStartError("IP Camera URL is not configured."); return; }
+
+            console.log("Attempting IP Camera stream via <video> tag...");
+            videoElement.style.display = 'block'; fallbackImageElement.style.display = 'none';
+            videoElement.srcObject = null;
+
+            videoElement.onerror = null; videoElement.onplaying = null; videoElement.onloadedmetadata = null;
+
+            videoElement.onerror = handleVideoTagError;
+            videoElement.onplaying = handleVideoTagSuccess;
+
+            console.log(`Setting video source to IP Cam URL: ${currentIpCameraUrl}`);
+
+            const url = new URL(currentIpCameraUrl);
+            url.searchParams.append('_t', Date.now());
+            videoElement.src = url.toString();
+            videoElement.load();
+        }
+
+        function handleVideoTagSuccess() {
+            console.log("IP Camera playback potentially started via <video> tag.");
+            if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+                console.log("Video dimensions confirmed. Proceeding.");
+                activeDisplayElement = videoElement;
+                setupCanvasAndStartProcessing("IP Camera (Video)");
+            } else {
+                 console.warn("<video> tag playing but dimensions zero. Will re-check shortly or fallback.");
+
+                 setTimeout(() => {
+                     if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+                         console.log("Video dimensions available after short delay.");
+                         activeDisplayElement = videoElement;
+                         setupCanvasAndStartProcessing("IP Camera (Video - Delayed)");
+                     } else {
+                         console.warn("Video dimensions still zero. Attempting MJPEG fallback.");
+                         videoElement.onerror = null;
+                         videoElement.onplaying = null;
+                         tryMJPEGFallback();
+                     }
+                 }, 500);
+            }
+        }
+
+        function handleVideoTagError(e) {
+
+            if (activeSourceInfoElement.textContent.includes("Image Mode")) {
+                console.log("Already attempting image fallback, ignoring video error.");
+                return;
+            }
+            console.warn("IP Camera <video> tag failed. Error:", e?.type || e?.message || "Unknown error", ". Attempting MJPEG fallback.");
+            videoElement.onerror = null;
+            videoElement.onplaying = null;
+            tryMJPEGFallback();
+        }
+
+        function tryMJPEGFallback() {
+            const shortUrl = currentIpCameraUrl.length > 20 ? currentIpCameraUrl.substring(0, 20) + '...' : currentIpCameraUrl;
+            activeSourceInfoElement.textContent = `Source: IP Cam (${shortUrl}) - Image Mode`;
+            console.log('Attempting MJPEG fallback via <img>...');
+            videoElement.style.display = 'none';
+            videoElement.src = ''; videoElement.srcObject = null;
+
+            fallbackImageElement.style.display = 'block';
+
+            fallbackImageElement.onload = null; fallbackImageElement.onerror = null;
+
+
+            const imageUrl = new URL(currentIpCameraUrl);
+            imageUrl.searchParams.append('_t', Date.now());
+            console.log(`Setting fallback image source to: ${imageUrl.toString()}`);
+            fallbackImageElement.src = imageUrl.toString();
+
+
+            fallbackImageElement.onload = handleImageFallbackSuccess;
+            fallbackImageElement.onerror = handleImageFallbackError;
+        }
+
+        function handleImageFallbackSuccess() {
+
+             if (fallbackImageElement.complete && fallbackImageElement.naturalWidth > 0 && fallbackImageElement.naturalHeight > 0) {
+                 console.log("MJPEG stream working via <img> tag fallback.");
+                 activeDisplayElement = fallbackImageElement;
+                 setupCanvasAndStartProcessing("IP Camera (MJPEG)");
+
+                 if (imageRefreshIntervalId) { clearInterval(imageRefreshIntervalId); imageRefreshIntervalId = null; }
+             } else {
+                 console.warn("Image fallback loaded but dimensions/state invalid. Waiting slightly.");
+
+                 setTimeout(() => {
+                     if (fallbackImageElement.complete && fallbackImageElement.naturalWidth > 0 && fallbackImageElement.naturalHeight > 0) {
+                         console.log("MJPEG img dimensions confirmed after delay.");
+                         activeDisplayElement = fallbackImageElement;
+                         setupCanvasAndStartProcessing("IP Camera (MJPEG - Delayed)");
+                     } else {
+                        console.error("Image fallback loaded but natural dimensions are zero or invalid even after delay.");
+                        handleImageFallbackError(new Error("Image loaded but dimensions invalid."));
+                     }
+                 }, 300);
+             }
+        }
+
+        function handleImageFallbackError(e) {
+            console.error("MJPEG <img> fallback also failed. Error:", e?.type || e?.message || "Unknown error");
+            fallbackImageElement.onerror = null;
+            fallbackImageElement.onload = null;
+            handleStartError("Both Video and Image modes failed for IP Camera. Check URL/stream/CORS.");
+        }
+
+
+        function setupCanvasAndStartProcessing(sourceName) {
+            if (!activeDisplayElement) {
+                console.error("setupCanvas: No active element!");
+                handleStartError("Internal error: Cannot setup processing.");
+                return;
+            }
+            let width, height;
+            try {
+                 if (activeDisplayElement.tagName === 'VIDEO') {
+                     width = activeDisplayElement.videoWidth;
+                     height = activeDisplayElement.videoHeight;
+                 } else {
+                     width = activeDisplayElement.naturalWidth;
+                     height = activeDisplayElement.naturalHeight;
+                 }
+             } catch (e) {
+                 console.error("Error getting dimensions during setup:", e);
+                 handleStartError("Error reading video/image dimensions.");
+                 return;
+            }
+
+            if (!width || !height || width <= 0 || height <= 0) {
+                console.error(`setupCanvas: Invalid dimensions (${width}x${height}) for ${sourceName}.`);
+                handleStartError(`Invalid media dimensions (${width}x${height}).`);
+                return;
+            }
+
+             console.log(`Setting up canvas (${width}x${height}) and starting processing for ${sourceName}.`);
+             canvasElement.width = width;
+             canvasElement.height = height;
+             cameraOffMessage.classList.add('hidden');
+             updateStatusDisplay(sourceName, 'ok', 'Operational');
+             cameraStatusElement.textContent = 'Active';
+             cameraStatusElement.className = 'font-medium status-ok';
+             startCameraButton.disabled = false;
+             startCameraButton.innerHTML = '<i class="fas fa-stop mr-2"></i>Stop Video';
+             startCameraButton.classList.replace('bg-blue-500', 'bg-red-500');
+             startCameraButton.classList.replace('hover:bg-blue-600', 'hover:bg-red-600');
+
+             if (intervalId) {
+                 console.warn("Clearing existing process interval before starting new one.");
+                 clearInterval(intervalId);
+             }
+             intervalId = setInterval(processFrame, processInterval);
+             console.log(`Processing interval started (ID: ${intervalId}, ${processInterval}ms).`);
+
+             setTimeout(processFrame, 100);
+        }
+
+        function handleStartError(errorMessage) {
+             console.error("Video Start Error:", errorMessage);
+             if (videoErrorTimeout) clearTimeout(videoErrorTimeout);
+
+             cameraMessageText.textContent = `Error: ${errorMessage}`;
+             cameraOffMessage.classList.remove('hidden');
+             updateStatusDisplay('Video Error', 'error', 'Error');
+             cameraStatusElement.textContent = 'Error';
+             cameraStatusElement.className = 'font-medium status-error';
+             activeSourceInfoElement.textContent = 'Source: Error';
+
+
+             stopCamera();
+
+
+             videoErrorTimeout = setTimeout(() => {
+
+                 if (cameraStatusElement.textContent === 'Error') {
+                     cameraMessageText.textContent = "Video source is off.";
+                 }
+             }, 10000);
+        }
+
+        function stopCamera() {
+            console.log(">>> stopCamera() called <<<");
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+                console.log("Local stream stopped.");
+            }
+
+            if (imageRefreshIntervalId !== null) {
+                clearInterval(imageRefreshIntervalId);
+                imageRefreshIntervalId = null;
+                console.log("Image refresh interval cleared.");
+            }
+
+
+            videoElement.onerror = null; videoElement.onplaying = null; videoElement.onloadedmetadata = null;
+            videoElement.srcObject = null; videoElement.src = '';
+
+            videoElement.pause();
+            try { videoElement.load(); } catch(e) { console.warn("Minor error calling load() on video stop:", e)}
+            videoElement.style.display = 'block';
+
+            fallbackImageElement.onload = null; fallbackImageElement.onerror = null;
+            fallbackImageElement.src = '';
+            fallbackImageElement.style.display = 'none';
+
+            if (intervalId !== null) {
+                console.log(`Clearing process interval ID: ${intervalId}`);
+                clearInterval(intervalId);
+                intervalId = null;
+            } else {
+                console.log("No active process interval to clear.");
+            }
+
+            activeDisplayElement = null;
+            isProcessing = false;
+
+
+            cameraOffMessage.classList.remove('hidden');
+            cameraMessageText.textContent = "Video source is off.";
+            updateStatusDisplay('Video Off', 'inactive', 'Off');
+            cameraStatusElement.textContent = 'Off';
+            cameraStatusElement.className = 'font-medium status-inactive';
+            processingIndicator.style.display = 'none';
+            activeSourceInfoElement.textContent = "Source: Off";
+            resetUIDataState();
+
+
+            startCameraButton.disabled = false;
+            startCameraButton.innerHTML = '<i class="fas fa-play mr-2"></i>Start Video';
+
+            startCameraButton.classList.remove('bg-red-500', 'hover:bg-red-600');
+            startCameraButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
+
+
+            if (videoErrorTimeout) clearTimeout(videoErrorTimeout);
+            videoErrorTimeout = null;
+
+            console.log("Video stopped and UI reset complete.");
+        }
+
+        async function processFrame() {
+             if (!activeDisplayElement || isProcessing || !intervalId) {
+
+                 return;
+             }
+
+             const currentElement = activeDisplayElement;
+             let frameWidth, frameHeight, isElementReady = false;
+
+
+             try {
+                 if (currentElement.tagName === 'VIDEO') {
+
+                     isElementReady = currentElement.readyState >= 2;
+                     frameWidth = currentElement.videoWidth;
+                     frameHeight = currentElement.videoHeight;
+                 } else if (currentElement.tagName === 'IMG') {
+                     isElementReady = currentElement.complete;
+                     frameWidth = currentElement.naturalWidth;
+                     frameHeight = currentElement.naturalHeight;
+                 }
+             } catch (e) {
+                 console.error("Error accessing active element properties in processFrame:", e);
+
+                 return;
+             }
+
+             if (!isElementReady || !frameWidth || !frameHeight || frameWidth <= 0 || frameHeight <= 0) {
+
+                 return;
+             }
+
+             isProcessing = true;
+             processingIndicator.style.display = 'block';
+
+             try {
+
+                 if (canvasElement.width !== frameWidth || canvasElement.height !== frameHeight) {
+                     console.log(`Adjusting canvas size from ${canvasElement.width}x${canvasElement.height} to ${frameWidth}x${frameHeight}`);
+                     canvasElement.width = frameWidth;
+                     canvasElement.height = frameHeight;
+                 }
+
+                 context.drawImage(currentElement, 0, 0, frameWidth, frameHeight);
+                 const imageData = canvasElement.toDataURL('image/jpeg', 0.9);
+
+                 const response = await fetch('/process_frame', {
+                     method: 'POST',
+                     headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify({ image: imageData }),
+                 });
+
+                 if (!response.ok) {
+                     const errorText = await response.text();
+                     console.error('Server error processing frame:', response.status, errorText);
+                     updateServerStatus(`Error (${response.status})`, 'error');
+                 } else {
+                     const data = await response.json();
+                     if (data.status === 'success') {
+                         updateDashboardUI(data);
+                         updateServerStatus('OK', 'ok');
+                     } else {
+                         console.error('Server reported processing error:', data.message);
+                         updateServerStatus('Processing Error', 'error');
+
+                     }
+                 }
+
+             } catch (error) {
+                  if (error instanceof DOMException && error.name === 'SecurityError') {
+                      console.error('Canvas Security Error (Tainted Canvas):', error);
+                      handleStartError("Canvas Error: Cross-origin restrictions prevent processing this source.");
+                      stopCamera();
+                  } else {
+                      console.error(`Error in processFrame (drawing from ${currentElement?.tagName}):`, error);
+                      updateServerStatus('Client Error', 'error');
+                  }
+             } finally {
+                 isProcessing = false;
+                 processingIndicator.style.display = 'none';
+             }
+        }
+
+        function updateServerStatus(text, statusClass) {
+            serverStatusElement.textContent = text;
+            serverStatusElement.className = `font-medium status-${statusClass}`;
+        }
+
+        function updateSmsStatus(isActiveCooldown, isTriggeredNow) {
+             const element = document.getElementById('smsStatus');
+             if (isTriggeredNow) {
+                 element.textContent = 'Triggered';
+                 element.className = 'font-medium status-warning animate-pulse';
+                 setTimeout(() => element.classList.remove('animate-pulse'), 3000);
+             } else if (isActiveCooldown) {
+                 element.textContent = 'Active (Cooldown)';
+                 element.className = 'font-medium status-warning';
+             } else {
+                 element.textContent = 'Inactive';
+                 element.className = 'font-medium status-inactive';
+             }
+        }
+
+
+        function updateLocationContextUI() {
+             if (currentLat !== null && currentLon !== null) {
+                 locationContextSection.classList.remove('hidden');
+
+             } else {
+                 locationContextSection.classList.remove('hidden');
+                 locationContextStatus.textContent = "Location not configured in settings.";
+                 locationContextStatus.className = "text-xs text-slate-500 italic mb-3";
+                 locationContextList.innerHTML = '';
+             }
+        }
+
+        async function fetchLocationContext() {
+            if (currentLat === null || currentLon === null) {
+                console.log("Skipping context fetch: Location not set.");
+
+                updateLocationContextUI();
+                return;
+            }
+            console.log("Fetching location context...");
+            locationContextStatus.textContent = "Updating context...";
+            locationContextStatus.className = "text-xs text-slate-400 italic mb-3";
+
+            try {
+                const response = await fetch('/get_location_context');
+                 if (!response.ok) {
+                     const errorData = await response.json().catch(() => ({ message: `HTTP error ${response.status}`}));
+                     throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
+                 }
+                const data = await response.json();
+                console.log("Location context received:", data);
+
+                 displayLocationContext(data);
+
+
+                 if (data.status === 'success') {
+                     locationContextStatus.textContent = `Context updated: ${new Date().toLocaleTimeString()}`;
+                     locationContextStatus.className = "text-xs text-green-600 italic mb-3";
+                 } else if (data.status === 'error_partial') {
+                     locationContextStatus.textContent = `Context partially updated (errors): ${new Date().toLocaleTimeString()}`;
+                     locationContextStatus.className = "text-xs status-warning italic mb-3";
+                 } else {
+
+                     let errorMessage = data.message || (data.errors && data.errors.length > 0 ? data.errors[0] : 'Unknown error');
+                     let errorClass = "text-xs status-error italic mb-3";
+                     if (data.status === 'no_location' || data.status === 'no_api_key') {
+                         errorClass = "text-xs status-warning italic mb-3";
+                     }
+                    locationContextStatus.textContent = `Context unavailable: ${errorMessage}`;
+                    locationContextStatus.className = errorClass;
+                 }
+
+            } catch (error) {
+                console.error('Error fetching location context:', error);
+                locationContextStatus.textContent = `Error fetching context: ${error.message}`;
+                locationContextStatus.className = "text-xs status-error italic mb-3";
+                locationContextList.innerHTML = '<li><i class="fas fa-exclamation-circle fa-fw status-error"></i> Error loading context data.</li>';
+            }
+        }
+
+        function displayLocationContext(contextData) {
+             locationContextList.innerHTML = '';
+
+
+             let trafficIcon = 'fa-traffic-light', trafficColorClass = 'text-slate-500', trafficText = "N/A";
+             if (contextData.traffic_summary) {
+                 trafficText = contextData.traffic_summary;
+                 switch(trafficText) {
+                     case 'Heavy': trafficIcon = 'fa-car-burst'; trafficColorClass = 'status-error'; break;
+                     case 'Moderate': trafficIcon = 'fa-car-side'; trafficColorClass = 'status-warning'; break;
+                     case 'Light': case 'Normal': trafficIcon = 'fa-road'; trafficColorClass = 'status-ok'; break;
+                 }
+             }
+             const trafficLi = document.createElement('li');
+             trafficLi.innerHTML = `<i class="fas ${trafficIcon} fa-fw ${trafficColorClass}"></i> Traffic: <span class="context-item-value ${trafficColorClass}">${trafficText}</span>`;
+             locationContextList.appendChild(trafficLi);
+
+
+             if (contextData.nearby_pois && contextData.nearby_pois.length > 0) {
+                 const poiHeader = document.createElement('li');
+                 poiHeader.innerHTML = `<i class="fas fa-map-marker-alt fa-fw"></i> Nearby POIs:`;
+                 poiHeader.className = "mt-2 font-medium text-slate-600";
+                 locationContextList.appendChild(poiHeader);
+
+                 contextData.nearby_pois.slice(0, 3).forEach(poi => {
+                     const li = document.createElement('li');
+                     li.className = "ml-6 text-sm";
+                     let poiType = poi.types[0] ? poi.types[0].replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Place';
+                     let distanceText = poi.distance !== null ? ` (~${poi.distance}m)` : '';
+                     li.innerHTML = `<span class="context-item-value">${poi.name}</span> <span class="text-slate-500">(${poiType})${distanceText}</span>`;
+                     locationContextList.appendChild(li);
+                 });
+             } else if (!contextData.errors?.some(e => e.includes("POI"))) {
+                  const noPoiLi = document.createElement('li');
+                  noPoiLi.innerHTML = `<i class="fas fa-map-marker-alt fa-fw"></i> No significant POIs found.`;
+                  noPoiLi.className = "text-slate-500";
+                  locationContextList.appendChild(noPoiLi);
+             }
+
+
+             if (contextData.errors && contextData.errors.length > 0) {
+                  const errorHeader = document.createElement('li');
+                  errorHeader.innerHTML = `<i class="fas fa-exclamation-triangle fa-fw status-error"></i> Context Errors:`;
+                  errorHeader.className = "mt-2 font-medium status-error";
+                  locationContextList.appendChild(errorHeader);
+                  contextData.errors.forEach(err => {
+                       const errLi = document.createElement('li');
+                       errLi.className = "ml-6 text-sm status-error";
+                       errLi.textContent = err.length > 80 ? err.substring(0, 80) + '...' : err;
+                       locationContextList.appendChild(errLi);
+                   });
+             }
+        }
+
+
+        function updateDashboardUI(data) {
+
+            document.getElementById('peopleCount').textContent = data.person_count;
+            document.getElementById('capacityLimit').textContent = data.threshold;
+
+
+            const densityElement = document.getElementById('densityLevel');
+            const overlayWarning = document.getElementById('overlayWarning');
+            const isCritical = data.density_level === 'CRITICAL';
+            const isHigh = data.density_level === 'HIGH';
+
+            let densityText = 'Normal';
+            let densityColorClass = 'text-purple-600';
+            let densityIconClass = 'fas fa-circle-nodes';
+             let densityIconColor = 'text-purple-600';
+
+            if (isCritical) {
+                densityText = 'Critical';
+                densityColorClass = 'status-error';
+                densityIconClass = 'fas fa-skull-crossbones';
+                 densityIconColor = 'status-error';
+            } else if (isHigh) {
+                densityText = 'High';
+                densityColorClass = 'status-warning';
+                densityIconClass = 'fas fa-triangle-exclamation';
+                 densityIconColor = 'status-warning';
+            }
+
+
+            densityElement.textContent = densityText;
+            densityElement.className = `text-3xl font-bold ${densityColorClass}`;
+            densityIcon.className = `${densityIconClass} text-xl ${densityIconColor}`;
+
+
+
+            overlayWarning.classList.toggle('hidden', !isCritical);
+
+
+            if (cameraStatusElement.textContent === 'Active') {
+                 let currentSourceName = "Video";
+                 try {
+
+                     const match = activeSourceInfoElement.textContent.match(/Source:\s*([^(\s]+)/);
+                     if (match && match[1]) currentSourceName = match[1];
+                 } catch (e) { console.warn("Could not parse source name for status."); }
+
+                 if(isCritical) {
+                     updateStatusDisplay(currentSourceName, 'error', 'CRITICAL DENSITY');
+                 } else if (isHigh) {
+                    updateStatusDisplay(currentSourceName, 'warning', 'High Density');
+                 } else {
+                    updateStatusDisplay(currentSourceName, 'ok', 'Operational');
+                 }
+            }
+
+
+            if (data.alert_triggered) {
+                addAlertMessage("Crowd threshold exceeded! Alert triggered.", 'critical');
+                document.getElementById('lastAlertTime').textContent = new Date().toLocaleTimeString();
+                updateSmsStatus(true, true);
+            } else {
+
+                updateSmsStatus(data.alert_active_cooldown, false);
+            }
+        }
+
+        function addAlertMessage(message, type = 'critical') {
+
+            if (!initialAlertMessageCleared && alertContainer.querySelector('p.italic')) {
+                alertContainer.innerHTML = '';
+                initialAlertMessageCleared = true;
+            }
+
+            const alertDiv = document.createElement('div');
+            const alertTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            let iconClass = 'fa-exclamation-circle';
+            let alertClass = 'alert-critical';
+
+            switch(type) {
+                case 'warning':
+                    iconClass = 'fa-exclamation-triangle';
+                    alertClass = 'alert-warning';
+                    break;
+                case 'info':
+                    iconClass = 'fa-info-circle';
+                    alertClass = 'alert-info';
+                    break;
+            }
+
+            alertDiv.className = `alert-item ${alertClass} flex justify-between items-center`;
+            alertDiv.innerHTML = `
+                <div><i class="fas ${iconClass}"></i> ${message}</div>
+                <span class="timestamp">${alertTime}</span>
+            `;
+            alertContainer.prepend(alertDiv);
+
+            while (alertContainer.children.length > 7) {
+                alertContainer.removeChild(alertContainer.lastChild);
+            }
+
+            if (type === 'critical' || type === 'warning') {
+                 alertDiv.classList.add('animate-pulse');
+                 setTimeout(() => { alertDiv.classList.remove('animate-pulse'); }, 3000);
+            }
+        }
+
+        function updateStatusDisplay(sourceName, statusClass, systemText) {
+            let bgColorClass = 'bg-slate-400';
+            switch(statusClass) {
+                case 'ok': bgColorClass = 'bg-green-500'; break;
+                case 'warning': bgColorClass = 'bg-amber-500'; break;
+                case 'error': bgColorClass = 'bg-red-600'; break;
+                case 'processing': bgColorClass = 'bg-blue-500'; break;
+            }
+
+            statusIndicator.className = `w-4 h-4 rounded-full ${bgColorClass} mr-3 flex-shrink-0`;
+             if (statusClass === 'ok' || statusClass === 'warning' || statusClass === 'error') {
+                 statusIndicator.classList.add('animate-pulse-status');
+             } else {
+                 statusIndicator.classList.remove('animate-pulse-status');
+             }
+
+
+            statusTextElement.textContent = systemText;
+            statusTextElement.className = `font-semibold status-${statusClass}`;
+        }
+
+        function resetUIDataState() {
+            console.log("Resetting UI data state.");
+            document.getElementById('peopleCount').textContent = '0';
+            document.getElementById('densityLevel').textContent = 'Off';
+            document.getElementById('densityLevel').className = 'text-3xl font-bold text-slate-500';
+            densityIcon.className = 'fas fa-circle-nodes text-xl text-slate-500';
+            document.getElementById('overlayWarning').classList.add('hidden');
+            updateServerStatus('Waiting...', 'inactive');
+        }
+
+
+
+        startCameraButton.addEventListener('click', () => {
+
+             if (intervalId !== null) {
+                console.log("Stop button clicked.");
+                stopCamera();
+             } else {
+                console.log("Start button clicked.");
+
+                 if (configuredSourceElement.textContent === 'Loading...' || configuredSourceElement.className.includes('status-error')) {
+                     console.warn("Start clicked before settings loaded/ready. Attempting to reload settings.");
+                     loadInitialSettings();
+                 } else {
+                    startCamera();
+                 }
+             }
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+             console.log("DOM Loaded. Initializing KavachAI Dashboard...");
+             loadInitialSettings().then(() => {
+                 if (currentVideoSourceType === 'local' && (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)) {
+                      console.error("Browser does not support local webcam access (getUserMedia).");
+                      handleStartError("Local webcam not supported by browser.");
+                      startCameraButton.disabled = true;
+                 } else {
+                     console.log("Initialization complete. Ready.");
+                 }
+             }).catch(err => {
+                 console.error("Critical error during initial settings load promise:", err);
+                 cameraMessageText.textContent = "Failed to load initial configuration.";
+                 startCameraButton.disabled = true;
+             });
+        });
+
+    </script>
+</body>
+</html>

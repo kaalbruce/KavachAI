@@ -1,0 +1,1 @@
+The yolov8x model is not able to be uploaded to the Github due to filesize.
